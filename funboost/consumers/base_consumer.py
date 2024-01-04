@@ -586,6 +586,11 @@ class AbstractConsumer(LoggerLevelSetterMixin, metaclass=abc.ABCMeta, ):
     # noinspection PyProtectedMember
     def _run_consuming_function_with_confirm_and_retry(self, kw: dict, current_retry_times,
                                                        function_result_status: FunctionResultStatus, ):
+
+        print(kw)
+        print(type(kw))
+        print(type(eval(kw)))
+
         function_only_params = delete_keys_and_return_new_dict(kw['body']) if self._do_not_delete_extra_from_msg is False else kw['body']
         task_id = kw['body']['extra']['task_id']
         t_start = time.time()
