@@ -511,13 +511,19 @@ class AbstractConsumer(LoggerLevelSetterMixin, metaclass=abc.ABCMeta, ):
 
     # noinspection PyProtectedMember
     def _run(self, kw: dict, ):
-        # print(kw)
+
         try:
             t_start_run_fun = time.time()
             max_retry_times = self._get_priority_conf(kw, 'max_retry_times')
             current_function_result_status = FunctionResultStatus(self.queue_name, self.consuming_function.__name__, kw['body'], )
             current_retry_times = 0
             function_only_params = delete_keys_and_return_new_dict(kw['body'])
+            if "extra" not in kw['body']:
+                extra_params = {'task_id': kw['body']['task_id'], 'publish_time': round(time.time(), 4),
+                                'publish_time_format': time.strftime('%Y-%m-%d %H:%M:%S')}
+
+                kw["body"]['extra'] = extra_params
+
             for current_retry_times in range(max_retry_times + 1):
                 current_function_result_status = self._run_consuming_function_with_confirm_and_retry(kw, current_retry_times=current_retry_times,
                                                                                                      function_result_status=FunctionResultStatus(
@@ -587,11 +593,14 @@ class AbstractConsumer(LoggerLevelSetterMixin, metaclass=abc.ABCMeta, ):
     def _run_consuming_function_with_confirm_and_retry(self, kw: dict, current_retry_times,
                                                        function_result_status: FunctionResultStatus, ):
 
-        print(kw)
-        print(type(kw))
-        print(type(eval(kw)))
-
         function_only_params = delete_keys_and_return_new_dict(kw['body']) if self._do_not_delete_extra_from_msg is False else kw['body']
+
+        # if "extra" not in kw['body']:
+        #     extra_params = {'task_id': kw['body']['task_id'], 'publish_time': round(time.time(), 4),
+        #                     'publish_time_format': time.strftime('%Y-%m-%d %H:%M:%S')}
+        #
+        #     kw["body"]['extra'] = extra_params
+
         task_id = kw['body']['extra']['task_id']
         t_start = time.time()
         function_result_status.run_times = current_retry_times + 1
