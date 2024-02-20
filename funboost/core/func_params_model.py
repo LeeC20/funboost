@@ -10,10 +10,6 @@ from funboost.concurrent_pool import FunboostBaseConcurrentPool, FlexibleThreadP
 from funboost.constant import ConcurrentModeEnum, BrokerEnum
 from pydantic import BaseModel, validator, root_validator, BaseConfig, Field
 
-# noinspection PyUnresolvedReferences
-from funboost.core.loggers import develop_logger
-from funboost.core.loggers import flogger
-
 
 def _patch_for_pydantic_field_deepcopy():
     from concurrent.futures import ThreadPoolExecutor
@@ -54,10 +50,16 @@ class BaseJsonAbleModel(BaseModel):
         return model_dict_copy
 
     def json_str_value(self):
-        return json.dumps(self.get_str_dict(), ensure_ascii=False, )
+        try:
+            return json.dumps(self.get_str_dict(), ensure_ascii=False, )
+        except TypeError as e:
+            return str(self.get_str_dict())
 
     def json_pre(self):
-        return json.dumps(self.get_str_dict(), ensure_ascii=False, indent=4)
+        try:
+            return json.dumps(self.get_str_dict(), ensure_ascii=False, indent=4)
+        except TypeError as e:
+            return str(self.get_str_dict())
 
     def update_from_dict(self, dictx: dict):
         for k, v in dictx.items():
@@ -89,6 +91,7 @@ class FunctionResultStatusPersistanceConfig(BaseJsonAbleModel):
     @validator('expire_seconds')
     def check_expire_seconds(cls, value):
         if value > 10 * 24 * 3600:
+            from funboost.core.loggers import flogger  # 这个文件不要提前导入日志,以免互相导入.
             flogger.warning(f'你设置的过期时间为 {value} ,设置的时间过长。 ')
         return value
 
@@ -169,7 +172,7 @@ class BoosterParams(BaseJsonAbleModel):
     broker_kind: str = BrokerEnum.PERSISTQUEUE  # 中间件选型见3.1章节 https://funboost.readthedocs.io/zh/latest/articles/c3.html
 
     broker_exclusive_config: dict = {}  # 加上一个不同种类中间件非通用的配置,不同中间件自身独有的配置，不是所有中间件都兼容的配置，因为框架支持30种消息队列，消息队列不仅仅是一般的先进先出queue这么简单的概念，
-    # 例如kafka支持消费者组，rabbitmq也支持各种独特概念例如各种ack机制 复杂路由机制，每一种消息队列都有独特的配置参数意义，可以通过这里传递。每种中间件能传递的键值对可以看consumer类的 BROKER_EXCLUSIVE_CONFIG_DEFAULT
+    # 例如kafka支持消费者组，rabbitmq也支持各种独特概念例如各种ack机制 复杂路由机制，有的中间件原生能支持消息优先级有的中间件不支持,每一种消息队列都有独特的配置参数意义，可以通过这里传递。每种中间件能传递的键值对可以看consumer类的 BROKER_EXCLUSIVE_CONFIG_DEFAULT
 
     auto_generate_info: dict = {}  # 自动生成的信息,不需要用户主动传参.
 

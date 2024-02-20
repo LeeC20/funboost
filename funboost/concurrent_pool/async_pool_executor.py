@@ -44,6 +44,9 @@ if __name__ == '__main__':
     loop.run_forever()
 """
 
+if sys.platform == "darwin":  # mac 上会出错
+      import selectors
+      selectors.DefaultSelector = selectors.PollSelector
 
 class AsyncPoolExecutorLtPy310(FunboostFileLoggerMixin,FunboostBaseConcurrentPool):
     """
@@ -158,6 +161,8 @@ class AsyncPoolExecutorGtPy310(AsyncPoolExecutorLtPy310):
 
 
 AsyncPoolExecutor = AsyncPoolExecutorLtPy310 if sys.version_info.minor < 10 else AsyncPoolExecutorGtPy310
+
+
 
 if __name__ == '__main__':
     def test_async_pool_executor():

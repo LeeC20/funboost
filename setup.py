@@ -2,13 +2,12 @@
 from setuptools import setup, find_packages
 from funboost import __version__
 
-
 extra_brokers = ['confluent_kafka==1.7.0',
                  "pulsar-client==3.1.0; python_version>='3.7'",
                  'celery',
                  'flower',
                  'nameko==2.14.1',
-                 'sqlalchemy==1.4.8',
+                 'sqlalchemy==1.4.13',
                  'sqlalchemy_utils==0.36.1',
                  'dramatiq==1.14.2',
                  'huey==2.4.5',
@@ -19,7 +18,7 @@ setup(
     name='funboost',  #
     version=__version__,
     description=(
-        'pip install funboost，python全功能分布式函数调度框架,。支持python所有类型的并发模式和一切知名消息队列中间件，支持celery框架整体作为funboost中间件，python函数加速器，框架包罗万象，一统编程思维，兼容50% python业务场景，适用范围广。只需要一行代码即可分布式执行python一切函数，99%用过funboost的pythoner 感受是 方便 快速 强大，相见恨晚 '
+        'pip install funboost，python全功能分布式函数调度框架,。支持python所有类型的并发模式和一切知名消息队列中间件，支持如 celery dramatiq等框架整体作为funboost中间件，python函数加速器，框架包罗万象，用户能想到的控制功能全都有。一统编程思维，兼容50% python业务场景，适用范围广。只需要一行代码即可分布式执行python一切函数，99%用过funboost的pythoner 感受是　简易 方便 强劲 强大，相见恨晚 '
     ),
     # long_description=open('README.md', 'r',encoding='utf8').read(),
     keywords=["funboost", "distributed-framework", "function-scheduling", "rabbitmq", "rocketmq", "kafka", "nsq", "redis", "disk",
@@ -63,7 +62,7 @@ setup(
         'Topic :: Software Development :: Libraries'
     ],
     install_requires=[
-        'nb_log>=11.9',
+        'nb_log>=12.2',
         'eventlet==0.33.3',
         'gevent==22.10.2',
         'pymongo==4.3.3',  # 3.5.1  -> 4.0.2
