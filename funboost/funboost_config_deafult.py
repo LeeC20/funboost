@@ -58,6 +58,10 @@ class BrokerConnConfig(DataClassBase):
         "security_protocol": "SASL_PLAINTEXT",
     }
 
+    #  https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md
+    KAFKA_CONNECTION_PARAMS = {}
+
+
     SQLACHEMY_ENGINE_URL = 'sqlite:////sqlachemy_queues/queues.db'
 
     # 如果broker_kind 使用 peewee 中间件模式会使用mysql配置

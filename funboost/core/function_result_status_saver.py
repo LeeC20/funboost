@@ -70,6 +70,15 @@ class FunctionResultStatus():
         item['script_name_long'] = self.script_name_long
         # item.pop('time_start')
         datetime_str = time_util.DatetimeConverter().datetime_str
+        if self.result is not None:
+
+            if type(self.result) is str:
+                temp_str = eval(self.result)
+                if type(temp_str) is dict:
+                    if "status" in temp_str.keys():
+                        print("temp_str['status']", temp_str['status'])
+                        item['success'] = True if temp_str['status'] == 2 else False
+
         try:
             json.dumps(item['result'])  # 不希望存不可json序列化的复杂类型。麻烦。存这种类型的结果是伪需求。
         except TypeError:
