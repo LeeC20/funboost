@@ -119,7 +119,7 @@ def query_cols_view():
 @app.route('/query_result')
 @login_required
 def query_result_view():
-    nb_print(request.values.to_dict())
+
     return jsonify(query_result(**request.values.to_dict()))
 
 
@@ -142,7 +142,7 @@ if __name__ == '__main__':
     # with app.test_request_context():
     #     print(url_for('query_cols_view'))
 
-    app.run(debug=False, threaded=True, host='0.0.0.0', port=27018)
+    app.run(debug=False, threaded=True, host='0.0.0.0', port=27019)
 
     '''
     linux 是export , win是 set

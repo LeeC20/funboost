@@ -138,11 +138,12 @@ class BoosterParams(BaseJsonAbleModel):
     is_push_to_dlx_queue_when_retry_max_times: bool = False  # 函数达到最大重试次数仍然没成功，是否发送到死信队列,死信队列的名字是 队列名字 + _dlx。
 
     consumin_function_decorator: typing.Callable = None  # 函数的装饰器。因为此框架做参数自动转指点，需要获取精准的入参名称，不支持在消费函数上叠加 @ *args  **kwargs的装饰器，如果想用装饰器可以这里指定。
-    function_timeout: typing.Union[int, float] = 0  # 超时秒数，函数运行超过这个时间，则自动杀死函数。为0是不限制。
+    function_timeout: typing.Union[int, float] = 0  # 超时秒数，函数运行超过这个时间，则自动杀死函数。为0是不限制。 谨慎使用,非必要别去设置超时时间,设置后性能会降低(因为需要把用户函数包装到另一个线单独的程中去运行),而且突然强制超时杀死运行中函数,可能会造成死锁.(例如用户函数在获得线程锁后突然杀死函数,别的线程再也无法获得锁了)
 
     log_level: int = logging.DEBUG  # 消费者和发布者的日志级别,建议设置DEBUG级别,不然无法知道正在运行什么消息
     logger_prefix: str = ''  # 日志名字前缀,可以设置前缀
     create_logger_file: bool = True  # 发布者和消费者是否创建文件文件日志,为False则只打印控制台不写文件.
+    logger_name: str = ''  # 队列消费者发布者的日志命名空间.
     log_filename: typing.Union[str, None] = None  # 消费者发布者的文件日志名字.如果为None,则自动使用 funboost.队列 名字作为文件日志名字.  日志文件夹是在nb_log_config.py的 LOG_PATH中决定的.
     is_show_message_get_from_broker: bool = False  # 运行时候,是否记录从消息队列获取出来的消息内容
     is_print_detail_exception: bool = True  # 消费函数出错时候,是否打印详细的报错堆栈,为False则只打印简略的报错信息不包含堆栈.
@@ -160,7 +161,7 @@ class BoosterParams(BaseJsonAbleModel):
     is_using_rpc_mode: bool = False  # 是否使用rpc模式，可以在发布端获取消费端的结果回调，但消耗一定性能，使用async_result.result时候会等待阻塞住当前线程。
     rpc_result_expire_seconds: int = 600  # 保存rpc结果的过期时间.
 
-    is_support_remote_kill_task: bool = False  # 是否支持远程任务杀死功能，如果任务数量少，单个任务耗时长，确实需要远程发送命令来杀死正在运行的函数，才设置为true，否则不建议开启此功能。
+    is_support_remote_kill_task: bool = False  # 是否支持远程任务杀死功能，如果任务数量少，单个任务耗时长，确实需要远程发送命令来杀死正在运行的函数，才设置为true，否则不建议开启此功能。(是把函数放在单独的线程中实现的,随时准备线程被远程命令杀死,所以性能会降低)
 
     is_do_not_run_by_specify_time_effect: bool = False  # 是否使不运行的时间段生效
     do_not_run_by_specify_time: tuple = ('10:00:00', '22:00:00')  # 不运行的时间段,在这个时间段自动不运行函数.
@@ -193,7 +194,7 @@ class BoosterParams(BaseJsonAbleModel):
         # if not set(values.keys()).issubset(set(BoosterParams.__fields__.keys())):
         #     raise ValueError(f'{cls.__name__} 的字段包含了父类 BoosterParams 不存在的字段')
         for k in values.keys():
-            if k not in BoosterParams.__fields__.keys():
+            if k not in BoosterParams.model_fields.keys():
                 raise ValueError(f'{cls.__name__} 的字段新增了父类 BoosterParams 不存在的字段 "{k}"')  # 使 BoosterParams的子类,不能增加字段,只能覆盖字段.
         return values
 
@@ -224,7 +225,7 @@ class PriorityConsumingControlConfig(BaseJsonAbleModel):
     例如消费为add函数，可以每个独立的任务设置不同的超时时间，不同的重试次数，是否使用rpc模式。这里的配置优先，可以覆盖生成消费者时候的配置。
     """
 
-    function_timeout: typing.Union[float, int] = None
+    function_timeout: typing.Union[float, int] = 0
     max_retry_times: int = None
     is_print_detail_exception: bool = None
     msg_expire_senconds: int = None
@@ -248,6 +249,7 @@ class PublisherParams(BaseJsonAbleModel):
     log_level: int = logging.DEBUG
     logger_prefix: str = ''
     create_logger_file: bool = True
+    logger_name: str = ''  # 队列消费者发布者的日志命名空间.
     log_filename: typing.Optional[str] = None
     clear_queue_within_init: bool = False  # with 语法发布时候,先清空消息队列
     consuming_function: typing.Callable = None  # consuming_function 作用是 inspect 模块获取函数的入参信息

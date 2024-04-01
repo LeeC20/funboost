@@ -7,6 +7,7 @@
 
 框架做主要的功能都是在这个文件里面实现的.
 """
+import functools
 import typing
 import abc
 import copy
@@ -29,13 +30,15 @@ from threading import Lock
 import asyncio
 
 import nb_log
+from funboost.core.current_task import funboost_current_task, get_current_taskid
 from funboost.core.loggers import develop_logger
 
 from funboost.core.func_params_model import BoosterParams, PublisherParams
+from funboost.core.task_id_logger import TaskIdLogger
 from nb_log import (get_logger, LoggerLevelSetterMixin, LogManager, CompatibleLogger,
                     LoggerMixinDefaultWithFileHandler, stdout_write, is_main_process,
                     nb_log_config_default)
-from funboost.core.loggers import FunboostFileLoggerMixin,logger_prompt
+from funboost.core.loggers import FunboostFileLoggerMixin, logger_prompt
 
 from apscheduler.jobstores.redis import RedisJobStore
 
@@ -44,7 +47,7 @@ from apscheduler.executors.pool import ThreadPoolExecutor as ApschedulerThreadPo
 from funboost.funboost_config_deafult import FunboostCommonConfig
 from funboost.concurrent_pool.single_thread_executor import SoloExecutor
 
-from funboost.core.function_result_status_saver import ResultPersistenceHelper, FunctionResultStatus
+from funboost.core.function_result_status_saver import ResultPersistenceHelper, FunctionResultStatus, RunStatus
 
 from funboost.core.helper_funs import delete_keys_and_return_new_dict, get_publish_time
 
@@ -66,6 +69,8 @@ from funboost.utils import decorators, time_util, redis_manager
 from funboost.constant import ConcurrentModeEnum, BrokerEnum
 from funboost.core import kill_remote_task
 from funboost.core.exceptions import ExceptionForRequeue, ExceptionForPushToDlxqueue
+# from funboost.core.booster import BoostersManager  互相导入
+from funboost.core.lazy_impoter import LazyImpoter
 
 
 # patch_apscheduler_run_job()
@@ -205,7 +210,6 @@ class AbstractConsumer(LoggerLevelSetterMixin, metaclass=abc.ABCMeta, ):
                                             'code_filename': Path(self.consuming_function.__code__.co_filename).as_posix()
                                             }
 
-
         self._has_start_delay_task_scheduler = False
         self._consuming_function_is_asyncio = inspect.iscoroutinefunction(self.consuming_function)
         self.custom_init()
@@ -215,6 +219,7 @@ class AbstractConsumer(LoggerLevelSetterMixin, metaclass=abc.ABCMeta, ):
                                                 logger_prefix=consumer_params.logger_prefix,
                                                 create_logger_file=consumer_params.create_logger_file,
                                                 log_filename=consumer_params.log_filename,
+                                                logger_name=consumer_params.logger_name,
                                                 broker_exclusive_config=self.consumer_params.broker_exclusive_config)
         if is_main_process:
             self.logger.info(f'{self.queue_name} consumer 的消费者配置:\n {self.consumer_params.json_str_value()}')
@@ -225,13 +230,14 @@ class AbstractConsumer(LoggerLevelSetterMixin, metaclass=abc.ABCMeta, ):
         if logger_prefix != '':
             logger_prefix += '--'
             # logger_name = f'{logger_prefix}{self.__class__.__name__}--{concurrent_name}--{queue_name}--{self.consuming_function.__name__}'
-        logger_name = f'funboost.{logger_prefix}{self.__class__.__name__}--{self.queue_name}'
+        logger_name = self.consumer_params.logger_name or  f'funboost.{logger_prefix}{self.__class__.__name__}--{self.queue_name}'
+        self.logger_name = logger_name
         log_filename = self.consumer_params.log_filename or f'funboost.{self.queue_name}.log'
-        self.logger = get_logger(logger_name,
-                                 log_level_int=self.consumer_params.log_level,
-                                 log_filename=log_filename if self.consumer_params.create_logger_file else None,
-                                 error_log_filename=nb_log.generate_error_file_name(log_filename),
-                                 formatter_template=FunboostCommonConfig.NB_LOG_FORMATER_INDEX_FOR_CONSUMER_AND_PUBLISHER, )
+        self.logger = LogManager(logger_name, logger_cls=TaskIdLogger).get_logger_and_add_handlers(
+            log_level_int=self.consumer_params.log_level,
+            log_filename=log_filename if self.consumer_params.create_logger_file else None,
+            error_log_filename=nb_log.generate_error_file_name(log_filename),
+            formatter_template=FunboostCommonConfig.NB_LOG_FORMATER_INDEX_FOR_CONSUMER_AND_PUBLISHER, )
         self.logger.info(f'队列 {self.queue_name} 的日志写入到 {nb_log_config_default.LOG_PATH} 文件夹的 {log_filename} 和 {nb_log.generate_error_file_name(log_filename)} 文件中')
 
     def _check_broker_exclusive_config(self):
@@ -359,8 +365,7 @@ class AbstractConsumer(LoggerLevelSetterMixin, metaclass=abc.ABCMeta, ):
         key = 'apscheduler.redisjobstore_runonce'
         if RedisMixin().redis_db_frame.sadd(key, runonce_uuid):  # 这样可以阻止多次启动同队列名消费者 redis jobstore多次运行函数.
             cls.logger_apscheduler.debug(f'延时任务用普通消息重新发布到普通队列 {msg}')
-            from funboost.core.booster import BoostersManager
-            BoostersManager.get_or_create_booster_by_queue_name(queue_name).publish(msg)
+            LazyImpoter().BoostersManager.get_or_create_booster_by_queue_name(queue_name).publish(msg)
 
     @abc.abstractmethod
     def _shedual_task(self):
@@ -530,10 +535,11 @@ class AbstractConsumer(LoggerLevelSetterMixin, metaclass=abc.ABCMeta, ):
                 kw["body"]['extra'] = extra_params
 
             for current_retry_times in range(max_retry_times + 1):
+                current_function_result_status.run_times = current_retry_times + 1
+                current_function_result_status.run_status = RunStatus.running
+                self._result_persistence_helper.save_function_result_to_mongo(current_function_result_status)
                 current_function_result_status = self._run_consuming_function_with_confirm_and_retry(kw, current_retry_times=current_retry_times,
-                                                                                                     function_result_status=FunctionResultStatus(
-                                                                                                         self.queue_name, self.consuming_function.__name__,
-                                                                                                         kw['body']))
+                                                                                                     function_result_status=current_function_result_status)
                 if (current_function_result_status.success is True or current_retry_times == max_retry_times
                         or current_function_result_status._has_requeue
                         or current_function_result_status._has_to_dlx_queue
@@ -544,7 +550,7 @@ class AbstractConsumer(LoggerLevelSetterMixin, metaclass=abc.ABCMeta, ):
                         time.sleep(self.consumer_params.retry_interval)
             if not (current_function_result_status._has_requeue and self.BROKER_KIND in [BrokerEnum.RABBITMQ_AMQPSTORM, BrokerEnum.RABBITMQ_PIKA, BrokerEnum.RABBITMQ_RABBITPY]):  # 已经nack了，不能ack，否则rabbitmq delevar tag 报错
                 self._confirm_consume(kw)
-
+            current_function_result_status.run_status = RunStatus.finish
             self._result_persistence_helper.save_function_result_to_mongo(current_function_result_status)
             if self._get_priority_conf(kw, 'do_task_filtering'):
                 self._redis_filter.add_a_value(function_only_params)  # 函数执行成功后，添加函数的参数排序后的键值对字符串到set中。
@@ -611,7 +617,12 @@ class AbstractConsumer(LoggerLevelSetterMixin, metaclass=abc.ABCMeta, ):
 
         task_id = kw['body']['extra']['task_id']
         t_start = time.time()
-        function_result_status.run_times = current_retry_times + 1
+        # function_result_status.run_times = current_retry_times + 1
+        fct = funboost_current_task()
+        fct.function_params = function_only_params
+        fct.full_msg = kw['body']
+        fct.function_result_status = function_result_status
+        fct.logger = self.logger
         try:
             function_run = self.consuming_function
             if self._consuming_function_is_asyncio:
@@ -639,6 +650,9 @@ class AbstractConsumer(LoggerLevelSetterMixin, metaclass=abc.ABCMeta, ):
             function_result_status.success = True
             if self.consumer_params.log_level <= logging.DEBUG:
                 result_str_to_be_print = str(function_result_status.result)[:100] if len(str(function_result_status.result)) < 100 else str(function_result_status.result)[:100] + '  。。。。。  '
+                # print(funboost_current_task().task_id)
+                # print(fct.function_result_status.task_id)
+                # print(get_current_taskid())
                 self.logger.debug(f' 函数 {self.consuming_function.__name__}  '
                                   f'第{current_retry_times + 1}次 运行, 正确了，函数运行时间是 {round(time.time() - t_start, 4)} 秒,入参是 {function_only_params} , '
                                   f'结果是  {result_str_to_be_print}   {self._get_concurrent_info()}  ')
@@ -693,20 +707,20 @@ class AbstractConsumer(LoggerLevelSetterMixin, metaclass=abc.ABCMeta, ):
             current_retry_times = 0
             function_only_params = delete_keys_and_return_new_dict(kw['body'])
             for current_retry_times in range(max_retry_times + 1):
+                current_function_result_status.run_times = current_retry_times + 1
+                current_function_result_status.run_status = RunStatus.running
+                self._result_persistence_helper.save_function_result_to_mongo(current_function_result_status)
                 current_function_result_status = await self._async_run_consuming_function_with_confirm_and_retry(kw, current_retry_times=current_retry_times,
-                                                                                                                 function_result_status=FunctionResultStatus(
-                                                                                                                     self.queue_name, self.consuming_function.__name__,
-                                                                                                                     kw['body'], ),
-                                                                                                                 )
+                                                                                                                 function_result_status=current_function_result_status)
                 if current_function_result_status.success is True or current_retry_times == max_retry_times or current_function_result_status._has_requeue:
                     break
                 else:
                     if self.consumer_params.retry_interval:
                         await asyncio.sleep(self.consumer_params.retry_interval)
 
-            # self._result_persistence_helper.save_function_result_to_mongo(function_result_status)
             if not (current_function_result_status._has_requeue and self.BROKER_KIND in [BrokerEnum.RABBITMQ_AMQPSTORM, BrokerEnum.RABBITMQ_PIKA, BrokerEnum.RABBITMQ_RABBITPY]):
                 await simple_run_in_executor(self._confirm_consume, kw)
+            current_function_result_status.run_status = RunStatus.finish
             await simple_run_in_executor(self._result_persistence_helper.save_function_result_to_mongo, current_function_result_status)
             if self._get_priority_conf(kw, 'do_task_filtering'):
                 # self._redis_filter.add_a_value(function_only_params)  # 函数执行成功后，添加函数的参数排序后的键值对字符串到set中。
@@ -770,6 +784,11 @@ class AbstractConsumer(LoggerLevelSetterMixin, metaclass=abc.ABCMeta, ):
         function_result_status.run_times = current_retry_times + 1
         # noinspection PyBroadException
         t_start = time.time()
+        fct = funboost_current_task()
+        fct.function_params = function_only_params
+        fct.full_msg = kw['body']
+        fct.function_result_status = function_result_status
+        fct.logger = self.logger
         try:
             corotinue_obj = self.consuming_function(**function_only_params)
             if not asyncio.iscoroutine(corotinue_obj):
